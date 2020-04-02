@@ -8,6 +8,8 @@ source_subpath: default/livecd-stage1-i686-mini
 portage_confdir: /worksrc/sysresccd-src/portage-etc-x86
 portage_overlay: /worksrc/sysresccd-src/portage-overlay
 
+# fstype "none" is not a valid type, it will cause catalyst to fail at
+# this point but that is the desired behavior and OKAY.
 livecd/fstype: none
 livecd/cdtar: /usr/share/catalyst/livecd/cdtar/isolinux-3.72-cdtar.tar.bz2
 livecd/iso: /worksrc/isofiles/systemrescuecd-x86-current.iso

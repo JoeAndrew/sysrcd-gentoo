@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+# Bazz note: I added some Bash stuff for the new initramfs wireless stuff.
+# so I edited the shebang accordingly.
+
 
 VERSION_MAJ=5
 VERSION_MIN=3
@@ -50,9 +53,14 @@ test -f /mnt/cdrom/image.squashfs || die "Cannot find a valid file in the ISO"
 [ -d ${TEMPDIR} ] && rm -rf ${TEMPDIR} ; mkdir -p ${TEMPDIR}
 cp /mnt/cdrom/image.squashfs ${TEMPDIR}/sysrcd.dat
 ( cd ${TEMPDIR} ; md5sum sysrcd.dat > sysrcd.md5 ; chmod 644 sysrcd.* ) 
-CDTYPE="$(cat /mnt/cdrom/image.squashfs.txt)"
+# BAZZ NOTE: The image.squashfs.txt was not present in the
+# /worksrc/isofiles/....iso file. so i hardcoded to full
+CDTYPE=full
+#CDTYPE="$(cat /mnt/cdrom/image.squashfs.txt)"
 CDVERS="$(cat ${REPOSRC}/overlay-squashfs-x86/root/version)"
-umount /mnt/cdrom
+# do not unmount yet, because we'll be needing some DLL's for the
+# wpa_supplicant that will be going into the shared initramfs for wireless
+# support
 
 # ========= update grub modules ================================================
 # The modules must match the grub verison which provides /usr/bin/grub-mkimage
@@ -107,8 +115,65 @@ newinitrfs="${curdir}/initram.igz"
 mkdir -p ${newramfs}
 cp -a ${REPOBIN}/overlay-initramfs/* ${newramfs}/
 
+# Copy necessary files for wireless, including DLL's from the ISO that
+# compiled wpa_supplicant so that it will run from the initramfs
+mkdir -p /mnt/squash
+mount /mnt/cdrom/image.squashfs /mnt/squash
+# The next section analyzes the dependent DLLs needed for wpa supplicant.
+# ldd outputs the following format:
+
+# ldd /mnt/squash/usr/sbin/wpa_supplicant
+# linux-gate.so.1 (0xf7ef5000)
+# librt.so.1 => /lib32/librt.so.1 (0xf7d0a000)
+# libnl-3.so.200 => not found
+# libnl-genl-3.so.200 => not found
+# libssl.so.1.0.0 => not found
+# libcrypto.so.1.0.0 => not found
+# libdbus-1.so.3 => /usr/lib32/libdbus-1.so.3 (0xf7cb7000)
+# libc.so.6 => /lib32/libc.so.6 (0xf7ad0000)
+# libpthread.so.0 => /lib32/libpthread.so.0 (0xf7aae000)
+# /lib/ld-linux.so.2 (0xf7ef6000)
+
+# I ran ldd from outside the chroot of the sqfs, hence the 'not found'
+# messages. We just want the first column, the filenames.
+
+# TODO: use ldd from chroot: chroot /mnt/squash ldd /usr/bin/wpa_cli...
+dllfiles1=$(chroot /mnt/squash ldd /usr/sbin/wpa_supplicant | awk '{print $1}')
+dllfiles2=$(chroot /mnt/squash ldd /usr/bin/wpa_cli | awk '{print $1}')
+dllfiles=$(echo ${dllfiles1} ${dllfiles2} | xargs -n1 | sort -u | \
+	grep -v linux-gate | xargs -I{} -n1 find /mnt/squash -name '{}' \
+	2>/dev/null)
+
+# awk prints the filename column, we remove the linux-gate since that is
+# an internal Linux file, and we search the squash for each dll location,
+# which is added to $dllfiles.
+
+wpabins="/usr/sbin/wpa_supplicant /usr/bin/wpa_cli /usr/bin/wpa_passphrase"
+wpafiles=$(for bin in $wpabins; do echo /mnt/squash${bin} ; done)
+
+for f in ${wpafiles} ${dllfiles} ; do
+  # We are going to make sure the directory component is created in the
+  # initramfs, and add those DLL files to the proper locations in the
+  # initramfs
+
+  # eg. /mnt/squash/lib/librt.so.1 -> /mnt/squash/lib 
+  filename_removed=${f%/*}
+
+  # eg. /mnt/squash/lib -> lib
+  prefix_removed=${filename_removed#/mnt/squash/}
+	
+  mkdir -p ${newramfs}/${prefix_removed}
+# Do not copy symlink, but the target file
+  cp ${f} ${newramfs}/${prefix_removed}
+done
+#done with squash
+umount /mnt/squash
+# we are done with the ISO mount
+umount /mnt/cdrom
+
 # setup custom busybox in initramfs
-( cd ${newramfs}/bin/ ; ln busybox sh )
+# bazz note: Hard links were not booting correctly. soft works
+( cd ${newramfs}/bin/ ; ln -s busybox sh )
 
 # copy the init boot script in the initramfs
 cp ${REPOSRC}/mainfiles/init ${newramfs}/init
@@ -122,8 +187,14 @@ echo 'building the new initramfs...'
 [ -d ${newramfs} ] && rm -rf ${newramfs} 
 
 # ========= copy embedded initramfs to permanent location =====================
-mkdir -p /var/tmp/EMBEDDEDINIT
-rsync -ax /worksrc/catalyst/tmp/default/livecd-stage2-*/etc/kernels/initramfs-*.cpio* /var/tmp/EMBEDDEDINIT/
+# Bazz note: this doesn't work, genkernel seems to no longer store an
+# external file of an embedded initramfs. If you must get to these files,
+# you can use `binwalk -e [kernel-file]`, then go into the created
+# _directory and do another binwalk -e on the hex-named file, and then you
+# will see a cpio-archive directory
+
+#mkdir -p /var/tmp/EMBEDDEDINIT
+#rsync -ax /worksrc/catalyst/tmp/default/livecd-stage2-*/etc/kernels/initramfs-*.cpio* /var/tmp/EMBEDDEDINIT/
 
 # ========= copy the new files to the pxe environment =========================
 if [ -d /tftpboot ]
@@ -198,7 +269,9 @@ pkglist_mini_eix="/var/tmp/catalyst/tmp/default/livecd-stage2-i686-mini/root/sys
 [ -f "${pkglist_mini_eix}" ] && cp "${pkglist_mini_eix}" "${REPOSRC}/pkglist/sysresccd-x86-packages-mini-eix-${CDVERS}.txt"
 
 # ========= prepare the backup ==================================================
-tar -c -z -f "${DESTDIR}/systemrescuecd-${CURARCH}-${VERSION}-${CDTYPE}-${MYDATE}.tar.gz" --exclude='.git' ${REPOSRC} ${REPOBIN} /worksrc/sysresccd-win*
+# No idea what this was used for. No such "sysresccd-win*" directory gets
+# built from SystemRescueCD source code
+#tar -c -z -f "${DESTDIR}/systemrescuecd-${CURARCH}-${VERSION}-${CDTYPE}-${MYDATE}.tar.gz" --exclude='.git' ${REPOSRC} ${REPOBIN} /worksrc/sysresccd-win*
 
 # ========= force recompilation of sys-apps/sysresccd-scripts ===================
 rm -f /var/tmp/catalyst/packages/default/livecd-stage2-*/sys-apps/sysresccd-*.tbz2

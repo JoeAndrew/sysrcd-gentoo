@@ -128,3 +128,6 @@ xfce-base/xfdesktop xfce_plugins_menu
 # fix up build errors
 >=dev-lang/python-2.7.15:2.7 sqlite
 x11-libs/libdrm video_cards_vmware
+# Bazz additions
+#>=dev-libs/openssl-1.0.2p -bindist
+net-misc/wget ssl

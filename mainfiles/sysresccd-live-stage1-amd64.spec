@@ -18,7 +18,9 @@ livecd/packages:
 	app-shells/bash
 	app-shells/zsh
 	dev-libs/libdnet
-	dev-libs/libelf
+# somehow the virtual/libelf dep is brought in which uses the other
+# elf lib distribution. so had to comment this out to avoid blocks
+#	dev-libs/libelf
 	dev-libs/libgcrypt
 	dev-python/setuptools
 	dev-util/gperf

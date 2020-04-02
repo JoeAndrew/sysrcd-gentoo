@@ -191,8 +191,9 @@ livecd/packages:
 	net-misc/netifrc
 	net-misc/netkit-rsh
 	net-misc/networkmanager
-	net-vpn/networkmanager-openvpn
-	net-vpn/networkmanager-vpnc
+# These next 2, on newer portage will be in net-vpn rather than net-misc
+	net-misc/networkmanager-openvpn
+	net-misc/networkmanager-vpnc
 	net-misc/ntp
 	net-misc/openssh
 	net-vpn/openvpn

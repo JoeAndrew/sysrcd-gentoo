@@ -1,6 +1,7 @@
 #!/bin/sh
 # Copyright 2003-2006 Gentoo Foundation
 # Copyright 2006-2012 Francois Dupoux
+# Copyright 2020 Michael Bazzinotti
 # Distributed under the terms of the GNU General Public License v2
 
 good_msg()
@@ -315,6 +316,28 @@ sysresccd_udev_stop()
     echo '6' > /proc/sys/kernel/printk
 }
 
+# Helper routine that handles both eth and wlan device bringup / report.
+# Used directly by sysresccd_netconfig()
+ifhelper()
+{
+  ethlist="$(/sbin/ifconfig -a | grep 'HWaddr' | grep "^${1}[0-9]*" | awk '{print $1}')"
+
+    if [ -z "${ethlist}" ]
+    then
+        echo "No ${2} interfaces found on your system."
+        sleep 2
+    else
+        echo "Here are the ${2} interfaces found on your system:"
+
+        for cureth in ${ethlist}
+        do
+            curmac="$(/sbin/ifconfig ${cureth} | grep 'HWaddr' | grep "^${1}[0-9]*"| awk '{print $5}')"
+            echo "* ${cureth}: ${curmac}"
+            ifconfig ${cureth} up
+        done
+    fi
+}
+
 sysresccd_netconfig()
 {
     good_msg "Performing the network configuration..."
@@ -323,7 +346,7 @@ sysresccd_netconfig()
     /sbin/ifconfig lo 127.0.0.1
 
     # ---- force dhcp if booting via pxe and no static configuration specified
-    if [ "${NETCONFIG}" = '1' ] && [ -z "${SETETHX}${NODHCP}${DODHCP}" ]
+    if [ "${NETCONFIG}" = '1' ] && [ -z "${SETETHX}${NODHCP}${DODHCP}${WIFI}" ]
     then
         DODHCP='all'
     fi
@@ -409,24 +432,8 @@ sysresccd_netconfig()
 
     if [ "${NETCONFIG}" = '1' ] # show interfaces detected with the new name
     then
-        ethlist="$(/sbin/ifconfig -a | grep 'HWaddr' | grep '^eth[0-9]*' | awk '{print $1}')"
-
-        if [ -z "${ethlist}" ]
-        then
-            echo "No ethernet interfaces found on your system, PXE boot won't work."
-            sleep 2
-        else
-            echo "Here are the ethernet interfaces found on your system:"
-
-            # ---- get the option from the boot command line # eg: "nameif=eth0!00:11:22:33:44:55,eth1!00:22:33:44:55:aa"
-            for cureth in ${ethlist}
-            do
-                #cureth="${ethlist[curpos]}"
-                curmac="$(/sbin/ifconfig ${cureth} | grep 'HWaddr' | grep '^eth[0-9]*' | awk '{print $5}')"
-                echo "* ${cureth}: ${curmac}"
-                ifconfig ${cureth} up
-            done
-        fi
+      ifhelper eth ethernet
+      ifhelper wlan wifi
     fi
 
     # ---- configure the ethernet interfaces if requested by 'ethx=ip' ----
@@ -459,45 +466,65 @@ sysresccd_netconfig()
     # ---- configure the network via dhcp ----
     if [ -n "${DODHCP}" ]
     then
+        local iname
+        if [ -z "${WIFI}" ]
+        then
+        	iname=eth
+        else
+        	iname=wlan
+        fi
+
         if [ "${DODHCP}" = 'all' ]
         then
-            ethlist="$(/sbin/ifconfig -a | grep 'eth' | awk '{print $1}' | busybox xargs)" # (eg: eth0 eth1 eth2)
+            ilist="$(/sbin/ifconfig -a | grep "${iname}" | awk '{print $1}' | busybox xargs)" # (eg: eth0 eth1 eth2)
         else
-            ethlist="$(echo ${DODHCP} | sed -e 's!,! !g')" # (eg: eth0 eth2)
+            ilist="$(echo ${DODHCP} | sed -e 's!,! !g')" # (eg: eth0 eth2)
         fi
 
         dhcpstate=''
         while [ "${dhcpstate}" != 'ok' ] # retry until we get a dhcp address on at least one interface
         do
-            for cureth in ${ethlist}
+            for curi in ${ilist}
             do
-                # Try to find whether or not the link is connected
-                mac=$(ifconfig ${cureth} | grep HWaddr | awk '{print $5}')
-                linkstate=''
-                if [ -z "${linkstate}" ] && [ -f /sbin/ethtool ] && /sbin/ethtool ${cureth} 2>/dev/null | grep -qiF 'Link detected: yes'
+                if [ -z "${WIFI}" ]
                 then
-                    linkstate='link-ok'
+                  # Try to find whether or not the link is connected
+                  mac=$(ifconfig ${curi} | grep HWaddr | awk '{print $5}')
+                  linkstate=''
+                  if [ -z "${linkstate}" ] && [ -f /sbin/ethtool ] && /sbin/ethtool ${curi} 2>/dev/null | grep -qiF 'Link detected: yes'
+                  then
+                      linkstate='link-ok'
+                  fi
+                  if [ -z "${linkstate}" ] && [ -f /sbin/mii-tool ] && /sbin/mii-tool ${curi} 2>/dev/null | grep -qiF 'link ok'
+                  then
+                      linkstate='link-ok'
+                  fi
+                  if [ -z "${linkstate}" ] && [ -f /sbin/mii-tool ] && /sbin/mii-tool ${curi} 2>/dev/null | grep -qiF 'no link'
+                  then
+                      linkstate='no-link'
+                  fi
+                  if [ -z "${linkstate}" ]
+                  then
+                      linkstate='unknown'
+                  fi
+                  echo "--- ${curi}: link=${linkstate}, mac=${mac}"
+								else
+                  linkstate='unknown'
+                  #pkill wpa_supplicant # kill any lingering process
+                  sleep 1
+                  if ! pgrep -f ${curi} > /dev/null
+                  then
+                      echo "Spawning wpa_supplicant on ${curi}"
+                      wpa_supplicant -B -Dwext -i${curi} -c/etc/wpa_supplicant.conf 2>/dev/null
+                  fi
+                  sleep 1 # let wpa_supplicant init
                 fi
-                if [ -z "${linkstate}" ] && [ -f /sbin/mii-tool ] && /sbin/mii-tool ${cureth} 2>/dev/null | grep -qiF 'link ok'
-                then
-                    linkstate='link-ok'
-                fi
-                if [ -z "${linkstate}" ] && [ -f /sbin/mii-tool ] && /sbin/mii-tool ${cureth} 2>/dev/null | grep -qiF 'no link'
-                then
-                    linkstate='no-link'
-                fi
-                if [ -z "${linkstate}" ]
-                then
-                    linkstate='unknown'
-                fi
-                echo "--- ${cureth}: link=${linkstate}, mac=${mac}"
-
                 # If the link is up, then try (even if another interface already has a dhcp address)
                 if [ "${linkstate}" != 'no-link' ] 
                 then
-                    good_msg "Attempting to get a DHCP address on ${cureth}..."
+                    good_msg "Attempting to get a DHCP address on ${curi}..."
                     [ -n "${DHCPHOSTNAME}" ] && hostnameopt="-H ${DHCPHOSTNAME}"
-                    cmd="busybox udhcpc -n -i ${cureth} ${hostnameopt}"
+                    cmd="busybox udhcpc -n -i ${curi} ${hostnameopt}"
                     ${cmd} ; res="$?"
                     echo "${cmd} --> ${res}"
                     [ "${res}" = '0' ] && dhcpstate='ok'
@@ -506,8 +533,38 @@ sysresccd_netconfig()
 
             if [ "${dhcpstate}" != 'ok' ]
             then
-                echo "Cannot get a DHCP address. Check the cables on the ethernet interfaces."
-                sleep 2
+                if [ -z "${WIFI}" ]
+                then
+                    echo "Cannot get a DHCP address. Check the cables on the ethernet interfaces."
+                    sleep 2
+                else
+                  bad_msg 'Cannot get a DHCP address.'
+                  bad_msg '- type "cli" to invoke wpa_cli for manual scan/join network'
+                  bad_msg '- type "econf" to edit wpa_supplicant.conf file'
+                  bad_msg '- type "shell" for a shell'
+                  bad_msg '- type "q" to skip...'
+                  printf "%s" "${2}(${oldvalue}) :: "
+                  read input
+                  case ${input} in
+                      'cli')
+                          wpa_cli -p /tmp/wpa_supplicant
+                          ;;
+                      'econf')
+                          vi /etc/wpa_supplicant.conf
+			  pkill wpa_supplicant
+                          ;;
+                      'q')
+                          echo "Skipping step, this will likely cause a boot failure."
+                          break
+                          ;;
+                      'shell')
+                          /bin/sh
+                          ;;
+                      '')
+                          ;;
+                  esac
+                  echo "Retrying.."
+                fi
             fi
         done
     fi
@@ -1309,6 +1366,7 @@ sysresccd_stage3_normal() # "backstore" + "aufs" + "mount --move"
     # prevent fbcon module from loading (console could become unusable)
     #echo "blacklist fbcon" >> ${NEWROOT}/etc/modprobe.d/blacklist.conf
 
+    # TODO: Add wifi section here
     # write network configuration in /etc/conf.d/net so that Network-Manager preserves current addresses
     > ${NEWROOT}/etc/conf.d/net
     ethlist="$(/sbin/ifconfig -a | grep 'eth' | awk '{print $1}' | busybox xargs)" # (eg: eth0 eth1 eth2)
@@ -1480,6 +1538,13 @@ sysresccd_parsecmdline()
         dodhcp)
             DODHCP='all'
             SETETHX=''
+            NETCONFIG='1'
+            NONETMGR='1'
+            ;;
+        wifi)
+            WIFI='1'
+            DODHCP='all'
+            #SETETHX=''
             NETCONFIG='1'
             NONETMGR='1'
             ;;
@@ -1711,6 +1776,7 @@ LOWMEM=''
 SETGW=''
 SETDNS=''
 SETETHX=''
+WIFI=''
 NETBOOT=''
 NFSBOOT=''
 NBDBOOT=''

@@ -1,0 +1,40 @@
+#!/bin/sh
+
+case ${1} in
+	renew|bound)
+		[ -n "$broadcast" ] && BROADCAST="broadcast $broadcast"
+		[ -n "$subnet" ] && NETMASK="netmask $subnet"
+		[ -n "$rootpath" ] && echo "$rootpath" > /rootpath
+		[ -n "$siaddr" ] && echo "siaddr=$siaddr" > /etc/tftp-siaddr
+
+		busybox ifconfig $interface $ip $BROADCAST $NETMASK
+
+		# ---- handle the default route
+		if [ -n "$router" ]
+		then
+			if [ "$router" != "$(route -n | grep '^0.0.0.0' | grep $interface | awk '{ print $2 }')" ]
+			then
+				while route del default gw 0.0.0.0 dev $interface 2>&- 
+				do
+					echo "removing old default route"
+				done				
+				for i in $router
+				do
+					route add default gw $i dev $interface
+					echo "set new default route: $i"
+				done
+			fi
+		fi
+
+		# ---- handle the DNS
+		rm -f /etc/resolv.conf 2>/dev/null
+		[ -n "$domain" ] && echo domain $domain >> /etc/resolv.conf
+		for curdns in $dns
+		do
+			echo nameserver $curdns >> /etc/resolv.conf
+		done
+	;;
+	deconfig)
+		busybox ifconfig $interface 0.0.0.0
+	;;
+esac

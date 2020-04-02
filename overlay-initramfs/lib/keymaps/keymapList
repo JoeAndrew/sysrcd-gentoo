@@ -1,0 +1,12 @@
+Please select a keymap from the following list by typing in the appropriate
+name or number. You should prefer the name to the number (for example 
+type 'fr' instead of '16'). Hit Enter for the default 'us' keymap.
+
+  1 azerty   2 be        3 bg      4 br-a     5 br-l     6 by       7 cf 
+  8 croat    9 cz       10 de     11 dk      12 dvorak  13 es      14 et 
+ 15 fi      16 fr       17 gr     18 hu      19 il      20 is      21 it 
+ 22 jp      23 la       24 lt     25 mk      26 nl      27 no      28 pl 
+ 29 pt      30 ro       31 ru     32 se      33 sg      34 sk-y    35 sk-z 
+ 36 slovene 37 trf      39 ua     40 uk      41 us      42 wangbe  43 fr_CH
+ 44 speakup 45 cs_CZ    46 de_CH  47 sg-lat1 48 fr-bepo 49 colemak 50 de_neo
+
