@@ -33,3 +33,4 @@ boot/kernel/rescue32/extraversion: i686
 boot/kernel/rescue32/packages:
 	app-emulation/open-vm-tools
 	sys-block/open-iscsi
+	net-wireless/broadcom-sta

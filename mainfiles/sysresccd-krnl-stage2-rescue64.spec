@@ -36,3 +36,6 @@ boot/kernel/rescue64/packages:
 # but, it compiled in stage2 32-bit and so it *should* work, but I haven't
 # tested it since I don't use this at all.
 #	sys-block/open-iscsi
+
+# Added my wireless driver
+	net-wireless/broadcom-sta
