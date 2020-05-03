@@ -16,7 +16,7 @@ livecd/iso: /worksrc/isofiles/systemrescuecd-x86-current.iso
 livecd/splash_type: 
 livecd/splash_theme: 
 livecd/bootargs: dokeymap
-livecd/gk_mainargs: --makeopts="-j5" --integrated-initramfs
+livecd/gk_mainargs: --makeopts="-j5" --integrated-initramfs --all-ramdisk-modules
 livecd/type: generic-livecd
 livecd/readme:
 livecd/motd: 
