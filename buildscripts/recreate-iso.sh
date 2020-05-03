@@ -137,10 +137,23 @@ mount /mnt/cdrom/image.squashfs /mnt/squash
 # I ran ldd from outside the chroot of the sqfs, hence the 'not found'
 # messages. We just want the first column, the filenames.
 
-# TODO: use ldd from chroot: chroot /mnt/squash ldd /usr/bin/wpa_cli...
-dllfiles1=$(chroot /mnt/squash ldd /usr/sbin/wpa_supplicant | awk '{print $1}')
-dllfiles2=$(chroot /mnt/squash ldd /usr/bin/wpa_cli | awk '{print $1}')
-dllfiles=$(echo ${dllfiles1} ${dllfiles2} | xargs -n1 | sort -u | \
+# If you noticed from the example ldd output, a library may be a filename
+# or a full path. For that reason, I decided to just strip all entries
+# down to the filename, using `basename`. Later, I search the squashfs
+# for the full path using `find`.
+dllfiles1=$(basename -a \
+$(chroot /mnt/squash ldd /usr/sbin/wpa_supplicant | awk '{print $1}'))
+dllfiles2=$(basename -a \
+$(chroot /mnt/squash ldd /usr/bin/wpa_cli | awk '{print $1}'))
+# Inadvertently, updating the DLLs that wpa_supplicant uses will cause
+# `wget` (used to download sysrcd.dat for net boots) to not function.
+# All of the DLLs that `wget` sources are not found from the `ldd` call,
+# so the full list comes from a call to strace.
+dllfiles3=$(basename -a \
+$(strace -e openat -f wget https://google.com 2>&1 | grep "lib.*\.so" | \
+awk '{print $2}' | tr -d '",'))
+
+dllfiles=$(echo ${dllfiles1} ${dllfiles2} ${dllfiles3} | xargs -n1 | sort -u | \
 	grep -v linux-gate | xargs -I{} -n1 find /mnt/squash -name '{}' \
 	2>/dev/null)
 
